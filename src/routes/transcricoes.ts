@@ -1,0 +1,186 @@
+import { Router, Request, Response } from 'express';
+import multer from 'multer';
+import { v4 as uuidv4 } from 'uuid';
+import { store } from '../services/store.js';
+import { extractDocumentText } from '../services/ocr.js';
+import { parseCartaoPonto } from '../extractors/cartaoPonto.js';
+import { parseHolerite } from '../extractors/holerite.js';
+import { generateSpreadsheet } from '../services/spreadsheet.js';
+import { isValidPdf, logError, logInfo, MAX_FILE_SIZE_BYTES } from '../utils/security.js';
+import { DocumentType } from '../types/index.js';
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_FILE_SIZE_BYTES }
+});
+
+export const router = Router();
+
+function getParamId(req: Request): string {
+  const raw = req.params['id'];
+  if (Array.isArray(raw)) return raw[0] || '';
+  return raw || '';
+}
+
+/**
+ * Worker assíncrono para processar o PDF em background.
+ */
+async function processTranscriptionBackground(id: string, tipo: DocumentType, pdfBuffer: Buffer): Promise<void> {
+  try {
+    logInfo('Worker:Start', { id, tipo });
+    const extractedDoc = await extractDocumentText(pdfBuffer);
+
+    let parsedValue;
+    if (tipo === 'cartao-ponto') {
+      parsedValue = parseCartaoPonto(extractedDoc);
+    } else {
+      parsedValue = parseHolerite(extractedDoc);
+    }
+
+    store.updateJobStatus(id, 'concluido', parsedValue, null);
+    logInfo('Worker:Complete', { id, tipo, pagesCount: parsedValue.pages.length });
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : 'Erro interno durante a extração do documento.';
+    logError(`Worker:Error_${id}`, err);
+    store.updateJobStatus(id, 'erro', null, errorMsg);
+  }
+}
+
+/**
+ * POST /api/transcricoes
+ * Envio de PDF para transcrição assíncrona.
+ */
+router.post('/transcricoes', upload.single('arquivo'), (req: Request, res: Response): void => {
+  try {
+    const tipo = req.body.tipo as DocumentType;
+
+    if (!tipo || (tipo !== 'cartao-ponto' && tipo !== 'holerite')) {
+      res.status(400).json({ erro: 'Campo "tipo" obrigatório e deve ser "cartao-ponto" ou "holerite".' });
+      return;
+    }
+
+    if (!req.file || !req.file.buffer) {
+      res.status(400).json({ erro: 'Arquivo PDF não fornecido no campo "arquivo".' });
+      return;
+    }
+
+    if (!isValidPdf(req.file.buffer)) {
+      res.status(400).json({ erro: 'O arquivo enviado não é um PDF válido.' });
+      return;
+    }
+
+    const id = uuidv4().substring(0, 8);
+    store.createJob(id, tipo, req.file.buffer, req.file.originalname);
+
+    // Dispara processamento em background (não bloqueia a resposta HTTP)
+    setImmediate(() => {
+      processTranscriptionBackground(id, tipo, req.file!.buffer);
+    });
+
+    res.status(202).json({ id });
+  } catch (err) {
+    logError('POST /api/transcricoes', err);
+    res.status(500).json({ erro: 'Erro interno ao iniciar processamento.' });
+  }
+});
+
+/**
+ * GET /api/transcricoes/:id
+ * Consulta status e resultado da transcrição.
+ */
+router.get('/transcricoes/:id', (req: Request, res: Response): void => {
+  const id = getParamId(req);
+  const job = store.getJob(id);
+
+  if (!job) {
+    res.status(404).json({ erro: 'Transcrição não encontrada.' });
+    return;
+  }
+
+  res.status(200).json({
+    id: job.id,
+    tipo: job.tipo,
+    status: job.status,
+    erro: job.erro,
+    value: job.value
+  });
+});
+
+/**
+ * PUT /api/transcricoes/:id
+ * Atualiza os dados com as correções feitas na interface de revisão.
+ */
+router.put('/transcricoes/:id', (req: Request, res: Response): void => {
+  const id = getParamId(req);
+  const { value } = req.body;
+
+  if (!value || typeof value !== 'object') {
+    res.status(400).json({ erro: 'Corpo da requisição deve conter o campo "value".' });
+    return;
+  }
+
+  const updated = store.updateJobValue(id, value);
+  if (!updated) {
+    res.status(404).json({ erro: 'Transcrição não encontrada.' });
+    return;
+  }
+
+  const job = store.getJob(id);
+  res.status(200).json({
+    id: job!.id,
+    tipo: job!.tipo,
+    status: job!.status,
+    erro: job!.erro,
+    value: job!.value
+  });
+});
+
+/**
+ * GET /api/transcricoes/:id/planilha
+ * Download da planilha corrigida nos formatos xlsx, csv ou json.
+ */
+router.get('/transcricoes/:id/planilha', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = getParamId(req);
+    const formatoQuery = (req.query.formato as string || 'xlsx').toLowerCase();
+    const formato = (formatoQuery === 'csv' || formatoQuery === 'json') ? formatoQuery : 'xlsx';
+
+    const job = store.getJob(id);
+    if (!job) {
+      res.status(404).json({ erro: 'Transcrição não encontrada.' });
+      return;
+    }
+
+    if (job.status !== 'concluido' || !job.value) {
+      res.status(400).json({ erro: 'A transcrição ainda não foi concluída com sucesso.' });
+      return;
+    }
+
+    const { buffer, contentType, filename } = await generateSpreadsheet(job.tipo, job.value, formato);
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (err) {
+    logError('GET /api/transcricoes/:id/planilha', err);
+    res.status(500).json({ erro: 'Erro ao gerar planilha.' });
+  }
+});
+
+/**
+ * GET /api/transcricoes/:id/pdf
+ * Visualização do PDF original enviado para preview lado a lado.
+ */
+router.get('/transcricoes/:id/pdf', (req: Request, res: Response): void => {
+  const id = getParamId(req);
+  const job = store.getJob(id);
+
+  if (!job || !job.pdfBuffer) {
+    res.status(404).json({ erro: 'PDF não encontrado.' });
+    return;
+  }
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${job.pdfFilename || 'documento.pdf'}"`);
+  res.send(job.pdfBuffer);
+});
