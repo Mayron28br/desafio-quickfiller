@@ -1,17 +1,11 @@
-# Saídas geradas pela aplicação
+# Saídas e Arquivos Temporários
 output/
-
-# Ferramentas internas de correção (não publicar)
-avaliacao/
 
 # Dependências
 node_modules/
-venv/
-env/
-__pycache__/
-*.pyc
+.npm/
 
-# IDEs
+# IDEs e Editores
 .vscode/
 .idea/
 *.swp
@@ -30,8 +24,6 @@ Thumbs.db
 # Builds
 dist/
 frontend/dist/
-
-desafio-programador/
 
 # NOTA: os PDFs de `exemplos/` e as planilhas entregues devem ser
 # versionados. Não adicione `*.pdf` / `*.xlsx` aqui.
