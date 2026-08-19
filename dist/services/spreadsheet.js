@@ -39,15 +39,17 @@ function buildCartaoPontoWorkbook(transcription) {
             }
         }
     }
-    // Garante ao menos 1 par (Entrada 1, Saída 1) e arredonda para pares
-    const numPairs = Math.max(1, Math.ceil(maxPunches / 2));
+    // Garante ao menos 3 pares (6 colunas: Manhã, Tarde, Extra) e arredonda para pares
+    const numPairs = Math.max(3, Math.ceil(maxPunches / 2));
     // Define as colunas
     const columns = [
         { header: 'Data', key: 'data', width: 14 }
     ];
     for (let i = 1; i <= numPairs; i++) {
-        columns.push({ header: `Entrada ${i}`, key: `in_${i}`, width: 13 });
-        columns.push({ header: `Saída ${i}`, key: `out_${i}`, width: 13 });
+        const inHeader = i === 3 ? 'Entrada Extra' : `Entrada ${i}`;
+        const outHeader = i === 3 ? 'Saída Extra' : `Saída ${i}`;
+        columns.push({ header: inHeader, key: `in_${i}`, width: 13 });
+        columns.push({ header: outHeader, key: `out_${i}`, width: 13 });
     }
     worksheet.columns = columns;
     styleHeaderRow(worksheet.getRow(1));
@@ -165,10 +167,12 @@ function buildCsv(tipo, value) {
                     maxPunches = d.punches.length;
             }
         }
-        const numPairs = Math.max(1, Math.ceil(maxPunches / 2));
+        const numPairs = Math.max(3, Math.ceil(maxPunches / 2));
         const headers = ['Data'];
         for (let i = 1; i <= numPairs; i++) {
-            headers.push(`Entrada ${i}`, `Saída ${i}`);
+            const inHeader = i === 3 ? 'Entrada Extra' : `Entrada ${i}`;
+            const outHeader = i === 3 ? 'Saída Extra' : `Saída ${i}`;
+            headers.push(inHeader, outHeader);
         }
         const lines = [headers.join(';')];
         for (const page of cp.pages) {

@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeTime, parseCartaoPonto } from '../src/extractors/cartaoPonto.js';
+import { normalizeTime, sanitizeTimeToken, parseCartaoPonto } from '../src/extractors/cartaoPonto.js';
 import { parseHolerite, extractCompetence } from '../src/extractors/holerite.js';
-import { ExtractedDocument } from '../services/ocr.js';
+import { ExtractedDocument, ExtractedPage, OcrWord } from '../src/services/ocr.js';
 
-test('Normalização de Horários: Trata formatos 08:25, 8:25, 08h25, sufixos d/c, prefixo + e incertezas (?)', () => {
+test('Normalização de Horários e Sanitização de OCR: Trata ruídos de carimbos, prefixos, múltiplos horários colados e incertezas (?)', () => {
   assert.equal(normalizeTime('8:25'), '08:25');
   assert.equal(normalizeTime('08h25'), '08:25');
   assert.equal(normalizeTime('18.30'), '18:30');
@@ -12,6 +12,16 @@ test('Normalização de Horários: Trata formatos 08:25, 8:25, 08h25, sufixos d/
   assert.equal(normalizeTime('+03:00d'), '03:00');
   assert.equal(normalizeTime('06:56c'), '06:56');
   assert.equal(normalizeTime('0?:25'), '0?:25');
+
+  // Padrões de ruído de OCR identificados no desafio
+  assert.deepEqual(sanitizeTimeToken('1:09:50'), ['09:50']);
+  assert.deepEqual(sanitizeTimeToken('-209-09'), ['09:09']);
+  assert.deepEqual(sanitizeTimeToken('809:41'), ['09:41']);
+  assert.deepEqual(sanitizeTimeToken('215:01'), ['15:01']);
+  assert.deepEqual(sanitizeTimeToken('18:45323:41'), ['18:45', '23:41']);
+  assert.deepEqual(sanitizeTimeToken('08.25'), ['08:25']);
+  assert.deepEqual(sanitizeTimeToken('08h25'), ['08:25']);
+  assert.deepEqual(sanitizeTimeToken('0950'), ['09:50']);
 });
 
 test('Extrator Cartão de Ponto: Extrai dias e batidas ordenadas sem descartar dias vazios', () => {
@@ -74,11 +84,11 @@ test('Extrator Cartão de Ponto: Layout Banco do Brasil (Entrada/Saída + Interv
   assert.equal(page.days.length, 4);
 
   // 01 SAB (sem batidas)
-  assert.equal(page.days[0]!.date_raw, '01 SAB');
+  assert.equal(page.days[0]!.date_raw, '01/05/2010');
   assert.equal(page.days[0]!.punches.length, 0);
 
   // 18 TER (Entrada 09:00, Saida 12:00, Entrada 13:00, Saida 18:00)
-  assert.equal(page.days[2]!.date_raw, '18 TER');
+  assert.equal(page.days[2]!.date_raw, '18/05/2010');
   assert.equal(page.days[2]!.punches.length, 4);
   assert.equal(page.days[2]!.punches[0]!.time_hhmm, '09:00');
   assert.equal(page.days[2]!.punches[1]!.time_hhmm, '12:00');
@@ -184,27 +194,97 @@ test('Extrator Cartão de Ponto: Layout Quinzena / Cartão de Ponto Cartográfic
 
   const p1 = result.pages[0]!;
   assert.equal(p1.days.length, 15);
-  assert.equal(p1.days[0]!.date_raw, '01');
+  assert.equal(p1.days[0]!.date_raw, '01/12/2020');
   assert.equal(p1.days[0]!.punches.length, 6);
   assert.equal(p1.days[0]!.punches[0]!.time_hhmm, '09:50');
   assert.equal(p1.days[0]!.punches[5]!.time_hhmm, '23:20');
 
   // Dia 2 é vazio
-  assert.equal(p1.days[1]!.date_raw, '02');
+  assert.equal(p1.days[1]!.date_raw, '02/12/2020');
   assert.equal(p1.days[1]!.punches.length, 0);
 
   // Dia 3 tem 6 batidas
-  assert.equal(p1.days[2]!.date_raw, '03');
+  assert.equal(p1.days[2]!.date_raw, '03/12/2020');
   assert.equal(p1.days[2]!.punches.length, 6);
   assert.equal(p1.days[2]!.punches[0]!.time_hhmm, '06:22');
 
   const p2 = result.pages[1]!;
   assert.equal(p2.days.length, 16); // 16 a 31
-  assert.equal(p2.days[0]!.date_raw, '16');
+  assert.equal(p2.days[0]!.date_raw, '16/12/2020');
   assert.equal(p2.days[0]!.punches.length, 0);
-  assert.equal(p2.days[1]!.date_raw, '17');
+  assert.equal(p2.days[1]!.date_raw, '17/12/2020');
   assert.equal(p2.days[1]!.punches.length, 6);
   assert.equal(p2.days[1]!.punches[0]!.time_hhmm, '09:32');
+  // Verifica preenchimento dos campos de múltiplos turnos
+  assert.equal(p2.days[1]!.entrada1, '09:32');
+  assert.equal(p2.days[1]!.saida1, '14:23');
+  assert.equal(p2.days[1]!.entrada2, '15:21');
+  assert.equal(p2.days[1]!.saida2, '16:20');
+  assert.equal(p2.days[1]!.entradaExtra, '16:35');
+  assert.equal(p2.days[1]!.saidaExtra, '23:42');
+});
+
+test('Extrator Cartão de Ponto: Agrupamento Espacial com Bounding Boxes (BBox) para 1ª e 2ª Quinzena Lado a Lado', () => {
+  const words: OcrWord[] = [
+    // Cabeçalho 1ª Quinzena (Esquerda)
+    { text: '1.QUINZENA', bbox: { x0: 50, y0: 20, x1: 150, y1: 40 } },
+    { text: 'MANHÃ', bbox: { x0: 80, y0: 45, x1: 120, y1: 60 } },
+    { text: 'TARDE', bbox: { x0: 180, y0: 45, x1: 220, y1: 60 } },
+    { text: 'EXTRA', bbox: { x0: 280, y0: 45, x1: 320, y1: 60 } },
+
+    // Dia 1 (Esquerda) com ruído de carimbo
+    { text: '1', bbox: { x0: 50, y0: 70, x1: 60, y1: 85 } },
+    { text: '809:41', bbox: { x0: 80, y0: 70, x1: 130, y1: 85 } }, // Entrada 1 (09:41)
+    { text: '12:00', bbox: { x0: 140, y0: 70, x1: 170, y1: 85 } }, // Saída 1
+    { text: '13:00', bbox: { x0: 180, y0: 70, x1: 210, y1: 85 } }, // Entrada 2
+    { text: '17:00', bbox: { x0: 220, y0: 70, x1: 250, y1: 85 } }, // Saída 2
+    { text: '18:00', bbox: { x0: 280, y0: 70, x1: 310, y1: 85 } }, // Entrada Extra
+    { text: '20:00', bbox: { x0: 320, y0: 70, x1: 350, y1: 85 } }, // Saída Extra
+
+    // Cabeçalho 2ª Quinzena (Direita)
+    { text: '2.QUINZENA', bbox: { x0: 450, y0: 20, x1: 550, y1: 40 } },
+    { text: 'MANHÃ', bbox: { x0: 480, y0: 45, x1: 520, y1: 60 } },
+    { text: 'TARDE', bbox: { x0: 580, y0: 45, x1: 620, y1: 60 } },
+    { text: 'EXTRA', bbox: { x0: 680, y0: 45, x1: 720, y1: 60 } },
+
+    // Dia 16 (Direita)
+    { text: '16', bbox: { x0: 450, y0: 70, x1: 465, y1: 85 } },
+    { text: '215:01', bbox: { x0: 480, y0: 70, x1: 530, y1: 85 } }, // Entrada 1 (15:01)
+    { text: '18:00', bbox: { x0: 540, y0: 70, x1: 570, y1: 85 } }, // Saída 1
+  ];
+
+  const doc: ExtractedDocument = {
+    totalPages: 1,
+    pages: [{
+      pageNumber: 1,
+      isOcr: true,
+      text: '1.QUINZENA 2.QUINZENA',
+      words
+    }]
+  };
+
+  const result = parseCartaoPonto(doc);
+  assert.equal(result.pages.length, 2);
+
+  // 1ª Quinzena (página 1 gerada)
+  const q1 = result.pages[0]!;
+  assert.equal(q1.days.length, 15);
+  assert.equal(q1.days[0]!.date_raw, '01/01/2026');
+  assert.equal(q1.days[0]!.punches.length, 6);
+  assert.equal(q1.days[0]!.entrada1, '09:41');
+  assert.equal(q1.days[0]!.saida1, '12:00');
+  assert.equal(q1.days[0]!.entrada2, '13:00');
+  assert.equal(q1.days[0]!.saida2, '17:00');
+  assert.equal(q1.days[0]!.entradaExtra, '18:00');
+  assert.equal(q1.days[0]!.saidaExtra, '20:00');
+
+  // 2ª Quinzena (página 2 gerada)
+  const q2 = result.pages[1]!;
+  assert.equal(q2.days.length, 16);
+  assert.equal(q2.days[0]!.date_raw, '16/01/2026');
+  assert.equal(q2.days[0]!.punches.length, 2);
+  assert.equal(q2.days[0]!.entrada1, '15:01');
+  assert.equal(q2.days[0]!.saida1, '18:00');
 });
 
 test('Extrator Cartão de Ponto: Layout SIPON / POEL,C (Múltiplas linhas por dia)', () => {
@@ -232,11 +312,11 @@ test('Extrator Cartão de Ponto: Layout SIPON / POEL,C (Múltiplas linhas por di
   assert.equal(page.days.length, 3);
 
   // Dia 1
-  assert.equal(page.days[0]!.date_raw, '01 - DOM');
+  assert.equal(page.days[0]!.date_raw, '01/07/2012');
   assert.equal(page.days[0]!.punches.length, 0);
 
   // Dia 2 (combina manhã e tarde: 09:03, 14:05, 15:12, 18:36)
-  assert.equal(page.days[1]!.date_raw, '02 - SEG');
+  assert.equal(page.days[1]!.date_raw, '02/07/2012');
   assert.equal(page.days[1]!.punches.length, 4);
   assert.equal(page.days[1]!.punches[0]!.time_hhmm, '09:03');
   assert.equal(page.days[1]!.punches[1]!.time_hhmm, '14:05');
@@ -244,7 +324,7 @@ test('Extrator Cartão de Ponto: Layout SIPON / POEL,C (Múltiplas linhas por di
   assert.equal(page.days[1]!.punches[3]!.time_hhmm, '18:36');
 
   // Dia 9
-  assert.equal(page.days[2]!.date_raw, '09 - QUI');
+  assert.equal(page.days[2]!.date_raw, '09/07/2012');
   assert.equal(page.days[2]!.punches.length, 0);
 });
 

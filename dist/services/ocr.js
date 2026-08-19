@@ -1,4 +1,4 @@
-import { extractText, renderPageAsImage } from 'unpdf';
+import { getDocumentProxy, renderPageAsImage } from 'unpdf';
 import { createWorker } from 'tesseract.js';
 import { logInfo, logError } from '../utils/security.js';
 /**
@@ -91,52 +91,121 @@ export async function preprocessImageForOcr(imageBuffer) {
 }
 /**
  * Extrai o texto de um documento PDF página por página.
- * Caso uma página não possua camada de texto vetorial útil (< 35 caracteres após remoção de metadados do PJe),
- * rasteriza a página para imagem, aplica pré-processamento de binarização adaptativa e OCR (Tesseract).
+ * Extrai preferencialmente a camada de texto selecionável do próprio PDF com posicionamento vetorial.
+ * Caso a página não possua texto útil (< 15 caracteres úteis), aplica rasterização e OCR (Tesseract).
  */
 export async function extractDocumentText(pdfBuffer) {
     const pages = [];
     try {
-        const { text, totalPages } = await extractText(new Uint8Array(pdfBuffer), { mergePages: false });
-        const pageTexts = Array.isArray(text) ? text : [text];
-        const total = totalPages || pageTexts.length || 1;
-        for (let i = 0; i < total; i++) {
-            const pageText = (pageTexts[i] || '').trim();
-            const usefulText = cleanPjeMetadata(pageText);
-            const pageNumber = i + 1;
-            // Se a página tem texto embutido útil suficiente (PDF Digital com tabela real)
-            if (usefulText.length >= 35) {
+        const doc = await getDocumentProxy(new Uint8Array(pdfBuffer));
+        const total = doc.numPages || 1;
+        for (let i = 1; i <= total; i++) {
+            const pageNumber = i;
+            let vectorText = '';
+            const vectorWords = [];
+            try {
+                const page = await doc.getPage(pageNumber);
+                const viewport = page.getViewport({ scale: 1.0 });
+                const textContent = await page.getTextContent();
+                if (textContent.items && textContent.items.length > 0) {
+                    const items = textContent.items.map(item => {
+                        const tx = item.transform[4] || 0;
+                        const ty = viewport.height - (item.transform[5] || 0);
+                        const w = item.width || 0;
+                        const h = item.height || Math.abs(item.transform[0]) || 10;
+                        return {
+                            text: item.str || '',
+                            x: tx,
+                            y: ty,
+                            w,
+                            h,
+                            bbox: { x0: tx, y0: ty - h, x1: tx + w, y1: ty }
+                        };
+                    }).filter(it => it.text.trim().length > 0);
+                    if (items.length > 0) {
+                        const lineTolerance = 4;
+                        const lines = [];
+                        items.sort((a, b) => a.y - b.y || a.x - b.x);
+                        for (const it of items) {
+                            let placed = false;
+                            for (const line of lines) {
+                                const avgY = line.reduce((s, x) => s + x.y, 0) / line.length;
+                                if (Math.abs(it.y - avgY) <= lineTolerance) {
+                                    line.push(it);
+                                    placed = true;
+                                    break;
+                                }
+                            }
+                            if (!placed) {
+                                lines.push([it]);
+                            }
+                        }
+                        const textLines = [];
+                        for (const line of lines) {
+                            line.sort((a, b) => a.x - b.x);
+                            textLines.push(line.map(x => x.text).join(' '));
+                            for (const it of line) {
+                                vectorWords.push({
+                                    text: it.text,
+                                    bbox: it.bbox,
+                                    confidence: 100
+                                });
+                            }
+                        }
+                        vectorText = textLines.join('\n').trim();
+                    }
+                }
+            }
+            catch (vecErr) {
+                logError(`VectorExtract:FailedPage_${pageNumber}`, vecErr);
+            }
+            const usefulText = cleanPjeMetadata(vectorText);
+            // Se a página tem texto vetorial selecionável real
+            if (usefulText.length >= 15) {
+                logInfo('VectorText:Found', { pageNumber, length: vectorText.length, wordsCount: vectorWords.length });
                 pages.push({
                     pageNumber,
-                    text: pageText,
-                    isOcr: false
+                    text: vectorText,
+                    isOcr: false,
+                    words: vectorWords
                 });
             }
             else {
-                // Página sem camada de texto útil (PDF Escaneado ou imagem com apenas carimbo PJe): rodar OCR
+                // Página escaneada / imagem pura sem texto selecionável: OCR
                 logInfo('OCR:FallbackNeeded', { pageNumber, usefulLength: usefulText.length });
                 let ocrText = '';
+                let ocrWords = [];
                 try {
                     const imageArrayBuffer = await renderPageAsImage(new Uint8Array(pdfBuffer), pageNumber, {
                         canvasImport: () => import('@napi-rs/canvas'),
                         scale: 2.5
                     });
-                    // Pré-processamento adaptativo de imagem antes do reconhecimento óptico
                     const rawBuffer = Buffer.from(imageArrayBuffer);
                     const enhancedBuffer = await preprocessImageForOcr(rawBuffer);
                     const worker = await createWorker('por');
                     const ret = await worker.recognize(enhancedBuffer);
                     ocrText = ret.data.text || '';
+                    ocrWords = (ret.data.words || []).map(w => ({
+                        text: w.text,
+                        bbox: {
+                            x0: w.bbox.x0,
+                            y0: w.bbox.y0,
+                            x1: w.bbox.x1,
+                            y1: w.bbox.y1
+                        },
+                        confidence: w.confidence
+                    }));
                     await worker.terminate();
-                    logInfo('OCR:Success', { pageNumber, textLength: ocrText.length });
+                    logInfo('OCR:Success', { pageNumber, textLength: ocrText.length, wordsCount: ocrWords.length });
                 }
                 catch (ocrErr) {
                     logError(`OCR:FailedForPage_${pageNumber}`, ocrErr);
                 }
                 pages.push({
                     pageNumber,
-                    text: ocrText || pageText,
-                    isOcr: true
+                    text: ocrText || vectorText,
+                    isOcr: true,
+                    words: ocrWords.length > 0 ? ocrWords : undefined
                 });
             }
         }

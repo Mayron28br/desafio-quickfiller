@@ -27,6 +27,30 @@ test('Alertas Cartão de Ponto: Batida Ímpar gera alerta amarelo', () => {
   assert.match(alert.reasons[0]!, /ímpar/i);
 });
 
+test('Alertas Cartão de Ponto: Slots vazios de múltiplos turnos não geram falso alerta ímpar', () => {
+  const pages: CartaoPontoPage[] = [
+    {
+      page: 1,
+      days: [
+        {
+          date_raw: '01/05/2026',
+          punches: [
+            { kind: 'IN', time_raw: '08:00', time_hhmm: '08:00' },
+            { kind: 'OUT', time_raw: '12:00', time_hhmm: '12:00' },
+            { kind: 'IN', time_raw: '', time_hhmm: '' },
+            { kind: 'OUT', time_raw: '', time_hhmm: '' }
+          ]
+        }
+      ]
+    }
+  ];
+
+  const alerts = calculateCartaoPontoAlerts(pages);
+  const alert = alerts.get('1-0');
+  assert.ok(alert);
+  assert.equal(alert.level, null);
+});
+
 test('Alertas Cartão de Ponto: Data Não Sequencial gera alerta vermelho', () => {
   const pages: CartaoPontoPage[] = [
     {

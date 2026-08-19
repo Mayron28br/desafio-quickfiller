@@ -9,9 +9,26 @@ export interface Punch {
   time_hhmm: string;
 }
 
+export interface RegistroCartaoPonto {
+  dia: number | string;
+  entrada1?: string;
+  saida1?: string;
+  entrada2?: string;
+  saida2?: string;
+  entradaExtra?: string;
+  saidaExtra?: string;
+  batidas?: Punch[];
+}
+
 export interface DayRecord {
   date_raw: string;
   punches: Punch[];
+  entrada1?: string;
+  saida1?: string;
+  entrada2?: string;
+  saida2?: string;
+  entradaExtra?: string;
+  saidaExtra?: string;
 }
 
 export interface CartaoPontoPage {

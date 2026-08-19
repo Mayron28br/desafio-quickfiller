@@ -105,9 +105,9 @@ async function processTranscriptionBackground(id: string, requestedTipo: string 
 
 /**
  * POST /api/transcricoes
- * Envio de PDF para transcrição assíncrona (com auto-detecção de tipo de documento).
+ * Envio de PDF para transcrição (com auto-detecção de tipo de documento).
  */
-router.post('/transcricoes', upload.single('arquivo'), (req: Request, res: Response): void => {
+router.post('/transcricoes', upload.single('arquivo'), async (req: Request, res: Response): Promise<void> => {
   try {
     const tipo = req.body.tipo as string | undefined;
 
@@ -130,10 +130,8 @@ router.post('/transcricoes', upload.single('arquivo'), (req: Request, res: Respo
     const initialTipo: DocumentType = (tipo === 'cartao-ponto' || tipo === 'holerite') ? tipo : 'cartao-ponto';
     store.createJob(id, initialTipo, req.file.buffer, req.file.originalname);
 
-    // Dispara processamento em background (não bloqueia a resposta HTTP)
-    setImmediate(() => {
-      processTranscriptionBackground(id, tipo, req.file!.buffer);
-    });
+    // Processa a transcrição antes de responder para garantir persistência no Vercel/Serverless
+    await processTranscriptionBackground(id, tipo, req.file.buffer);
 
     res.status(202).json({ id });
   } catch (err) {

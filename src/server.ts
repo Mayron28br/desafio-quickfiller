@@ -14,7 +14,7 @@ app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
 // Healthcheck
-app.get('/healthz', (_req: Request, res: Response) => {
+app.get(['/healthz', '/api/healthz'], (_req: Request, res: Response) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 

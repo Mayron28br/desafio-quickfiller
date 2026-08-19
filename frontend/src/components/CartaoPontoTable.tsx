@@ -11,10 +11,13 @@ export const CartaoPontoTable: React.FC<CartaoPontoTableProps> = ({ data, onChan
   let maxPunches = 0;
   data.pages.forEach(p => {
     p.days.forEach(d => {
-      if (d.punches.length > maxPunches) maxPunches = d.punches.length;
+      const validCount = d.punches.filter(punch => punch && (punch.time_hhmm?.trim() || punch.time_raw?.trim())).length;
+      if (validCount > maxPunches) maxPunches = validCount;
     });
   });
-  const numPairs = Math.max(1, Math.ceil(maxPunches / 2));
+
+  // Garante ao menos 3 pares (6 colunas: Manhã, Tarde, Extra)
+  const numPairs = Math.max(3, Math.ceil(maxPunches / 2));
 
   const handleDateChange = (pageIdx: number, dayIdx: number, newDate: string) => {
     const updatedPages = [...data.pages];
@@ -33,6 +36,11 @@ export const CartaoPontoTable: React.FC<CartaoPontoTableProps> = ({ data, onChan
     const day = { ...days[dayIdx]! };
     const punches = [...day.punches];
 
+    while (punches.length <= punchIdx) {
+      const k: PunchKind = punches.length % 2 === 0 ? 'IN' : 'OUT';
+      punches.push({ kind: k, time_raw: '', time_hhmm: '' });
+    }
+
     const kind: PunchKind = punchIdx % 2 === 0 ? 'IN' : 'OUT';
     punches[punchIdx] = {
       kind,
@@ -41,6 +49,13 @@ export const CartaoPontoTable: React.FC<CartaoPontoTableProps> = ({ data, onChan
     };
 
     day.punches = punches;
+    day.entrada1 = punches[0]?.time_hhmm || '';
+    day.saida1 = punches[1]?.time_hhmm || '';
+    day.entrada2 = punches[2]?.time_hhmm || '';
+    day.saida2 = punches[3]?.time_hhmm || '';
+    day.entradaExtra = punches[4]?.time_hhmm || '';
+    day.saidaExtra = punches[5]?.time_hhmm || '';
+
     days[dayIdx] = day;
     page.days = days;
     updatedPages[pageIdx] = page;
@@ -58,6 +73,13 @@ export const CartaoPontoTable: React.FC<CartaoPontoTableProps> = ({ data, onChan
     punches.push({ kind, time_raw: '00:00', time_hhmm: '00:00' });
 
     day.punches = punches;
+    day.entrada1 = punches[0]?.time_hhmm || '';
+    day.saida1 = punches[1]?.time_hhmm || '';
+    day.entrada2 = punches[2]?.time_hhmm || '';
+    day.saida2 = punches[3]?.time_hhmm || '';
+    day.entradaExtra = punches[4]?.time_hhmm || '';
+    day.saidaExtra = punches[5]?.time_hhmm || '';
+
     days[dayIdx] = day;
     page.days = days;
     updatedPages[pageIdx] = page;
@@ -79,12 +101,15 @@ export const CartaoPontoTable: React.FC<CartaoPontoTableProps> = ({ data, onChan
     let isRed = false;
     const reasons: string[] = [];
 
-    if (day.punches.length % 2 !== 0) {
+    // Considera apenas batidas preenchidas para contagem de paridade
+    const filledPunches = day.punches.filter(p => p && (p.time_hhmm?.trim() || p.time_raw?.trim()));
+    if (filledPunches.length % 2 !== 0) {
       isYellow = true;
       reasons.push('Número ímpar de batidas');
     }
 
-    const hasUncertainty = day.date_raw.includes('?') || day.punches.some(p => p.time_raw.includes('?') || p.time_hhmm.includes('?'));
+    const hasUncertainty = day.date_raw.includes('?') ||
+      filledPunches.some(p => (p.time_raw && p.time_raw.includes('?')) || (p.time_hhmm && p.time_hhmm.includes('?')));
     if (hasUncertainty) {
       isYellow = true;
       reasons.push('Caractere incerto (?) na linha');
@@ -122,20 +147,34 @@ export const CartaoPontoTable: React.FC<CartaoPontoTableProps> = ({ data, onChan
     return { level: null, reasons: [] };
   };
 
+  const getShiftGroupName = (pairIdx: number): string => {
+    if (pairIdx === 0) return 'Manhã';
+    if (pairIdx === 1) return 'Tarde';
+    if (pairIdx === 2) return 'Extra';
+    return `Extra ${pairIdx - 1}`;
+  };
+
   return (
     <div className="table-scroll-area">
       <table className="custom-table">
         <thead>
           <tr>
-            <th style={{ width: '40px' }}>Pág.</th>
-            <th style={{ width: '130px' }}>Data</th>
+            <th rowSpan={2} style={{ width: '40px', verticalAlign: 'middle' }}>Pág.</th>
+            <th rowSpan={2} style={{ width: '130px', verticalAlign: 'middle' }}>Data</th>
+            {Array.from({ length: numPairs }).map((_, i) => (
+              <th key={i} colSpan={2} style={{ textAlign: 'center', borderBottom: '1px solid #CBD5E1' }}>
+                {getShiftGroupName(i)}
+              </th>
+            ))}
+            <th rowSpan={2} style={{ width: '80px', verticalAlign: 'middle' }}>Ações</th>
+          </tr>
+          <tr>
             {Array.from({ length: numPairs }).map((_, i) => (
               <React.Fragment key={i}>
-                <th>Entrada {i + 1}</th>
-                <th>Saída {i + 1}</th>
+                <th style={{ fontSize: '0.75rem', fontWeight: 600 }}>Entrada</th>
+                <th style={{ fontSize: '0.75rem', fontWeight: 600 }}>Saída</th>
               </React.Fragment>
             ))}
-            <th style={{ width: '80px' }}>Ações</th>
           </tr>
         </thead>
         <tbody>

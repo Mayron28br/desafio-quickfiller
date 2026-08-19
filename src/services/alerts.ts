@@ -41,15 +41,16 @@ export function calculateCartaoPontoAlerts(pages: CartaoPontoPage[]): Map<string
       let isYellow = false;
       let isRed = false;
 
-      // 1. Batidas Ímpares
-      if (dayRecord.punches.length % 2 !== 0) {
+      // 1. Batidas Ímpares (considera apenas batidas preenchidas)
+      const validPunches = dayRecord.punches.filter(p => p && (p.time_hhmm?.trim() || p.time_raw?.trim()));
+      if (validPunches.length % 2 !== 0) {
         isYellow = true;
         reasons.push('Número ímpar de batidas (falta entrada ou saída)');
       }
 
       // 2. Incerteza ('?' em data ou horários)
       const hasUncertainty = dayRecord.date_raw.includes('?') ||
-        dayRecord.punches.some(p => p.time_raw.includes('?') || p.time_hhmm.includes('?'));
+        validPunches.some(p => (p.time_raw && p.time_raw.includes('?')) || (p.time_hhmm && p.time_hhmm.includes('?')));
       if (hasUncertainty) {
         isYellow = true;
         reasons.push('Caractere incerto (?) na leitura da linha');

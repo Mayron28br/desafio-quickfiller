@@ -21,9 +21,15 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Ambiente
+# Ambiente e Vercel
 .env
 .env.local
+.env.*.local
+.vercel/
+
+# Builds
+dist/
+frontend/dist/
 
 desafio-programador/
 

@@ -6,9 +6,11 @@
     "dev": "concurrently \"tsx watch src/server.ts\" \"npm --prefix frontend run dev\"",
     "dev:backend": "tsx watch src/server.ts",
     "dev:frontend": "npm --prefix frontend run dev",
+    "postinstall": "npm --prefix frontend install",
     "build:frontend": "npm --prefix frontend run build",
     "build:backend": "tsc",
     "build": "npm run build:frontend && npm run build:backend",
+    "vercel-build": "npm run build",
     "start": "node dist/server.js",
     "test": "tsx --test tests/**/*.test.ts"
   },
