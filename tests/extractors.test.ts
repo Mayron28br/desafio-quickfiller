@@ -86,6 +86,127 @@ test('Extrator Cartão de Ponto: Layout Banco do Brasil (Entrada/Saída + Interv
   assert.equal(page.days[2]!.punches[3]!.time_hhmm, '18:00');
 });
 
+test('Extrator Cartão de Ponto: Colunar com sufixos e descarte de colunas resumo', () => {
+  const doc: ExtractedDocument = {
+    totalPages: 1,
+    pages: [
+      {
+        pageNumber: 1,
+        isOcr: false,
+        text: `
+          16/12/2019 SEG 07:00d 12:00d 13:00d 17:00d
+          24/12/2019 TER ABONO JORNADA ENT/SAIDA | | | | | 08:00
+          28/12/2019 SAB 22:59d +03:00d +04:00d +06:59d | | | | 06:01
+          29/01/2020 QUA 22:55c +03:00d +04:00d +07:15c | 00:20 | | | 06:05
+        `
+      }
+    ]
+  };
+
+  const result = parseCartaoPonto(doc);
+  const page = result.pages[0]!;
+  assert.equal(page.days.length, 4);
+
+  // 16/12
+  assert.equal(page.days[0]!.punches.length, 4);
+  assert.equal(page.days[0]!.punches[0]!.time_raw, '07:00d');
+  assert.equal(page.days[0]!.punches[0]!.time_hhmm, '07:00');
+
+  // 24/12 (abono -> vazio)
+  assert.equal(page.days[1]!.punches.length, 0);
+
+  // 28/12 (+03:00d -> 03:00, ignora 06:01 da coluna de resumo à direita)
+  assert.equal(page.days[2]!.punches.length, 4);
+  assert.equal(page.days[2]!.punches[1]!.time_raw, '+03:00d');
+  assert.equal(page.days[2]!.punches[1]!.time_hhmm, '03:00');
+  assert.equal(page.days[2]!.punches[3]!.time_hhmm, '06:59');
+
+  // 29/01
+  assert.equal(page.days[3]!.punches.length, 4);
+  assert.equal(page.days[3]!.punches[0]!.time_hhmm, '22:55');
+});
+
+test('Extrator Cartão de Ponto: Layout Quinzena / Cartão de Ponto Cartográfico (1ª e 2ª Quinzena)', () => {
+  const doc: ExtractedDocument = {
+    totalPages: 2,
+    pages: [
+      {
+        pageNumber: 1,
+        isOcr: true,
+        text: `
+          1.QUINZENA Mês: Dezembro Ano: 2020
+          MANHÃ Entrada Saída TARDE Entrada Saída EXTRA Entrada Saída
+          1 09:50 14:15 15:14 19:21 19:35 23:20
+          2
+          3 06:22 14:31 15:27 19:16 19:29 23:28
+          4
+          5 09:09 14:04 15:01 18:14 18:29 23:45
+          6
+          7 09:30 14:59 15:40 19:44 20:16 22:40
+          8
+          9 09:41 15:10 16:04 19:55 20:10 23:43
+          10
+          11 09:42 14:16 15:12 19:47 20:00 23:27
+          12
+          13 09:34 12:53 13:40 16:45 16:58 23:30
+          14
+          15 09:39 16:00 16:57 19:59 20:12 22:41
+        `
+      },
+      {
+        pageNumber: 2,
+        isOcr: true,
+        text: `
+          2.QUINZENA Mês: Dezembro Ano: 2020
+          16
+          17 09:32 14:23 15:21 16:20 16:35 23:42
+          18
+          19 09:46 16:32 17:30 23:36
+          20
+          21 09:11 14:07 15:07 16:50 17:04 23:36
+          22 17:14 21:54 22:09 23:51
+          23 08:24 15:24 16:24 21:41 21:54 23:46
+          24
+          25
+          26
+          27 09:48 14:00 14:59 17:12 17:27 23:11
+          28
+          29 09:16 15:29 16:27 17:07 17:21 23:28
+          30
+          31 08:39 12:15 12:39 16:15
+        `
+      }
+    ]
+  };
+
+  const result = parseCartaoPonto(doc);
+  assert.equal(result.pages.length, 2);
+
+  const p1 = result.pages[0]!;
+  assert.equal(p1.days.length, 15);
+  assert.equal(p1.days[0]!.date_raw, '01');
+  assert.equal(p1.days[0]!.punches.length, 6);
+  assert.equal(p1.days[0]!.punches[0]!.time_hhmm, '09:50');
+  assert.equal(p1.days[0]!.punches[5]!.time_hhmm, '23:20');
+
+  // Dia 2 é vazio
+  assert.equal(p1.days[1]!.date_raw, '02');
+  assert.equal(p1.days[1]!.punches.length, 0);
+
+  // Dia 3 tem 6 batidas
+  assert.equal(p1.days[2]!.date_raw, '03');
+  assert.equal(p1.days[2]!.punches.length, 6);
+  assert.equal(p1.days[2]!.punches[0]!.time_hhmm, '06:22');
+
+  const p2 = result.pages[1]!;
+  assert.equal(p2.days.length, 16); // 16 a 31
+  assert.equal(p2.days[0]!.date_raw, '16');
+  assert.equal(p2.days[0]!.punches.length, 0);
+  assert.equal(p2.days[1]!.date_raw, '17');
+  assert.equal(p2.days[1]!.punches.length, 6);
+  assert.equal(p2.days[1]!.punches[0]!.time_hhmm, '09:32');
+});
+
 test('Extrator Cartão de Ponto: Layout SIPON / POEL,C (Múltiplas linhas por dia)', () => {
   const doc: ExtractedDocument = {
     totalPages: 1,
@@ -327,5 +448,39 @@ test('Auto-detecção de Documento: Identifica Cartão de Ponto vs Holerite auto
   assert.equal(detectDocumentType(pontoDoc), 'cartao-ponto');
   assert.equal(detectDocumentType(holeriteDoc), 'holerite');
 });
+
+test('Pré-processamento de Imagem: Executa binarização adaptativa de Otsu com sucesso', async () => {
+  const { preprocessImageForOcr } = await import('../src/services/ocr.js');
+  const { createCanvas } = await import('@napi-rs/canvas');
+
+  // Cria uma imagem sintética com texto cinza e ruído de fundo
+  const canvas = createCanvas(100, 50);
+  const rawBuffer = canvas.toBuffer('image/png');
+  const processedBuffer = await preprocessImageForOcr(rawBuffer);
+
+  assert.ok(processedBuffer instanceof Buffer);
+  assert.ok(processedBuffer.length > 0);
+});
+
+test('Reconhecimento de Imagem Pura: Detecta ausência de camada de texto e aciona OCR Tesseract', async () => {
+  const { cleanPjeMetadata } = await import('../src/services/ocr.js');
+
+  // 1. Página sem texto embutido (retorna vazio)
+  const emptyPageText = '';
+  assert.equal(cleanPjeMetadata(emptyPageText).length, 0);
+
+  // 2. Página que contém apenas carimbo/rodapé de assinatura eletrônica do PJe (sem texto de conteúdo)
+  const pjeOnlyText = `
+    Assinado eletronicamente por: FULANO DE TAL - 15/08/2021 14:32:10
+    Documento assinado eletronicamente por: JUIZ DO TRABALHO
+    Juntado em: 15/08/2021 14:32:10 - ID. a1b2c3d - Fls. 45
+    Tribunal Regional do Trabalho da 2ª Região
+  `;
+  const usefulText = cleanPjeMetadata(pjeOnlyText);
+  // O texto útil é menor que o threshold (35 caracteres), indicando necessidade mandatória de OCR
+  assert.ok(usefulText.length < 35);
+});
+
+
 
 

@@ -93,5 +93,8 @@ Este documento registra a condução do projeto, as ferramentas utilizadas, a in
 - [x] Front-end React com visualizador de PDF lado a lado e tabela editável.
 - [x] Suíte completa de testes unitários com 100% de sucesso.
 - [x] Geração de PDFs de exemplo (digitais e escaneados) em `exemplos/`.
+- [x] Pré-processamento adaptativo de imagem com binarização de Otsu para OCR.
+- [x] Motor de validação contábil em tempo real e sumário de horas apuradas no frontend.
+- [x] Histórico de transcrições recentes da sessão e atalhos de teclado (`Ctrl+S`).
 - [x] Dockerfile multi-stage e Docker Compose.
 - [x] Documentação técnica completa em `SOLUCAO.md` e `PROCESSO.md`.

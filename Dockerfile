@@ -1,5 +1,5 @@
 # Stage 1: Build do Front-end
-FROM node:22-alpine AS frontend-builder
+FROM node:22-slim AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm install
@@ -7,16 +7,16 @@ COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Build do Back-end
-FROM node:22-alpine AS backend-builder
+FROM node:22-slim AS backend-builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm install
 COPY tsconfig.json ./
 COPY src/ ./src
-RUN npm run build
+RUN npm run build:backend
 
 # Stage 3: Imagem de Produção
-FROM node:22-alpine AS runner
+FROM node:22-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -33,3 +33,4 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 EXPOSE 3000
 
 CMD ["node", "dist/server.js"]
+

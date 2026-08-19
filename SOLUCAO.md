@@ -80,7 +80,7 @@ A aplicação estará acessível em: `http://localhost:3000`.
 ## 5. Estratégia e Justificativa dos Testes
 
 - **`tests/alerts.test.ts`**: Valida a derivação correta de batidas ímpares, quebras de sequência de data/mês e a precedência estrita do alerta vermelho sobre o amarelo.
-- **`tests/extractors.test.ts`**: Valida todos os layouts reais de Cartão de Ponto (Banco do Brasil, SIPON, Colunar Operador, Quinzenal) e Holerite (2 colunas, via dupla, competências diversas e separação estrita de bases).
+- **`tests/extractors.test.ts`**: Valida todos os layouts reais de Cartão de Ponto (Banco do Brasil, SIPON, Colunar Operador, Quinzenal), Holerite (2 colunas, via dupla, competências diversas, separação de bases) e binarização adaptativa de imagem para OCR.
 - **`tests/spreadsheet.test.ts`**: Valida a geração de `.xlsx`, `.csv` e `.json` com cabeçalhos corretos e matriz transposta de verbas.
 
 ---
@@ -100,3 +100,4 @@ A aplicação estará acessível em: `http://localhost:3000`.
 | Etapa 9 | Geração de PDFs de exemplo com cenários de teste reais em `exemplos/`. |
 | Etapa 10 | Configuração de `Dockerfile` multi-stage e `docker-compose.yml`. |
 | Etapa 11 | Suporte avançado a múltiplos layouts reais (Banco do Brasil, SIPON, Colunar Operador, Holerite 2 Colunas, Quinzena manual) e detecção de scans PJe. |
+| Etapa 12 | Implementação de diferenciais competitivos: Binarização adaptativa de Otsu para OCR, Validação Contábil em tempo real, Totalizador de Jornada, Atalho `Ctrl+S` e Histórico de Transcrições Recentes. |

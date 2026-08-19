@@ -16,7 +16,7 @@ export interface ExtractedDocument {
 /**
  * Remove cabeçalhos e rodapés de assinatura eletrônica do PJe para avaliar se há conteúdo real na página.
  */
-function cleanPjeMetadata(text: string): string {
+export function cleanPjeMetadata(text: string): string {
   return text
     .replace(/Assinado eletronicamente por:.*$/gmi, '')
     .replace(/Documento assinado eletronicamente por:?.*$/gmi, '')
@@ -30,9 +30,95 @@ function cleanPjeMetadata(text: string): string {
 }
 
 /**
+ * Calcula o limiar de Otsu para binarização adaptativa de imagem de documento.
+ */
+function calculateOtsuThreshold(grayData: Uint8Array): number {
+  const histogram = new Array(256).fill(0);
+  const total = grayData.length;
+
+  for (let i = 0; i < total; i++) {
+    histogram[grayData[i]!]!++;
+  }
+
+  let sum = 0;
+  for (let t = 0; t < 256; t++) {
+    sum += t * histogram[t]!;
+  }
+
+  let sumB = 0;
+  let wB = 0;
+  let wF = 0;
+  let varMax = 0;
+  let threshold = 140; // Fallback padrão
+
+  for (let t = 0; t < 256; t++) {
+    wB += histogram[t]!;
+    if (wB === 0) continue;
+
+    wF = total - wB;
+    if (wF === 0) break;
+
+    sumB += t * histogram[t]!;
+    const mB = sumB / wB;
+    const mF = (sum - sumB) / wF;
+
+    const varBetween = wB * wF * (mB - mF) * (mB - mF);
+
+    if (varBetween > varMax) {
+      varMax = varBetween;
+      threshold = t;
+    }
+  }
+
+  return Math.max(100, Math.min(threshold, 200));
+}
+
+/**
+ * Aplica pré-processamento adaptativo de imagem (luminância Rec. 601 e binarização de Otsu)
+ * para eliminar ruídos de digitalização, sombras de fotocópias e maximizar a acurácia do OCR.
+ */
+export async function preprocessImageForOcr(imageBuffer: Buffer): Promise<Buffer> {
+  try {
+    const { createCanvas, loadImage } = await import('@napi-rs/canvas');
+    const image = await loadImage(imageBuffer);
+    const canvas = createCanvas(image.width, image.height);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(image, 0, 0);
+
+    const imgData = ctx.getImageData(0, 0, image.width, image.height);
+    const data = imgData.data;
+    const totalPixels = image.width * image.height;
+    const grayData = new Uint8Array(totalPixels);
+
+    for (let i = 0; i < totalPixels; i++) {
+      const idx = i * 4;
+      const gray = Math.round(0.299 * data[idx]! + 0.587 * data[idx + 1]! + 0.114 * data[idx + 2]!);
+      grayData[i] = gray;
+    }
+
+    const threshold = calculateOtsuThreshold(grayData);
+
+    for (let i = 0; i < totalPixels; i++) {
+      const idx = i * 4;
+      const val = grayData[i]! < threshold ? 0 : 255;
+      data[idx] = val;
+      data[idx + 1] = val;
+      data[idx + 2] = val;
+      data[idx + 3] = 255;
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+    return canvas.toBuffer('image/png');
+  } catch (err) {
+    logError('PreprocessImage:Failed', err);
+    return imageBuffer;
+  }
+}
+
+/**
  * Extrai o texto de um documento PDF página por página.
  * Caso uma página não possua camada de texto vetorial útil (< 35 caracteres após remoção de metadados do PJe),
- * rasteriza a página para imagem e aplica OCR (Tesseract) como fallback.
+ * rasteriza a página para imagem, aplica pré-processamento de binarização adaptativa e OCR (Tesseract).
  */
 export async function extractDocumentText(pdfBuffer: Buffer): Promise<ExtractedDocument> {
   const pages: ExtractedPage[] = [];
@@ -65,8 +151,12 @@ export async function extractDocumentText(pdfBuffer: Buffer): Promise<ExtractedD
             scale: 2.5
           });
 
+          // Pré-processamento adaptativo de imagem antes do reconhecimento óptico
+          const rawBuffer = Buffer.from(imageArrayBuffer);
+          const enhancedBuffer = await preprocessImageForOcr(rawBuffer);
+
           const worker = await createWorker('por');
-          const ret = await worker.recognize(Buffer.from(imageArrayBuffer));
+          const ret = await worker.recognize(enhancedBuffer);
           ocrText = ret.data.text || '';
           await worker.terminate();
           logInfo('OCR:Success', { pageNumber, textLength: ocrText.length });

@@ -6,11 +6,15 @@ import { ProcessingProgress } from './components/ProcessingProgress';
 import { PdfViewer } from './components/PdfViewer';
 import { CartaoPontoTable } from './components/CartaoPontoTable';
 import { HoleriteTable } from './components/HoleriteTable';
+import { HistoryModal, type HistoryItem } from './components/HistoryModal';
 import { CheckCircle2 } from 'lucide-react';
+
+const HISTORY_STORAGE_KEY = 'quickfiller_recent_history';
 
 export function App() {
   const [step, setStep] = useState<'upload' | 'processing' | 'review'>('upload');
   const [transcriptionId, setTranscriptionId] = useState<string | null>(null);
+  const [currentFilename, setCurrentFilename] = useState<string>('documento.pdf');
   const [tipo, setTipo] = useState<DocumentType | null>(null);
   const [data, setData] = useState<TranscriptionValue | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -18,7 +22,44 @@ export function App() {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Histórico de transcrições da sessão
+  const [history, setHistory] = useState<HistoryItem[]>(() => {
+    try {
+      const saved = localStorage.getItem(HISTORY_STORAGE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+
   const pollingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Salva histórico no localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history));
+    } catch (e) {
+      console.error('Erro ao salvar histórico local:', e);
+    }
+  }, [history]);
+
+  // Listener de atalhos globais de teclado (Ctrl + S para salvar)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        if (step === 'review' && !isSaving && transcriptionId && data) {
+          handleSave();
+        }
+      }
+      if (e.key === 'Escape' && isHistoryOpen) {
+        setIsHistoryOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [step, isSaving, transcriptionId, data, isHistoryOpen]);
 
   useEffect(() => {
     return () => {
@@ -30,6 +71,7 @@ export function App() {
     setIsLoading(true);
     setError(null);
     setTipo(null);
+    setCurrentFilename(file.name);
 
     try {
       const formData = new FormData();
@@ -49,14 +91,14 @@ export function App() {
       const { id } = await res.json();
       setTranscriptionId(id);
       setStep('processing');
-      startPolling(id);
+      startPolling(id, file.name);
     } catch (err: any) {
       setError(err.message || 'Erro de conexão com o servidor.');
       setIsLoading(false);
     }
   };
 
-  const startPolling = (id: string) => {
+  const startPolling = (id: string, filename: string) => {
     if (pollingTimerRef.current) clearInterval(pollingTimerRef.current);
 
     pollingTimerRef.current = setInterval(async () => {
@@ -72,6 +114,19 @@ export function App() {
           setData(job.value);
           setStep('review');
           setIsLoading(false);
+
+          // Adiciona ao histórico recente
+          setHistory(prev => {
+            const filtered = prev.filter(item => item.id !== id);
+            const newItem: HistoryItem = {
+              id,
+              filename: filename || 'documento.pdf',
+              tipo: job.tipo,
+              timestamp: new Date().toISOString(),
+              pagesCount: job.value ? (job.value as any).pages?.length : 1,
+            };
+            return [newItem, ...filtered].slice(0, 15);
+          });
         } else if (job.status === 'erro') {
           if (pollingTimerRef.current) clearInterval(pollingTimerRef.current);
           setError(job.erro || 'Ocorreu um erro durante o processamento do documento.');
@@ -82,6 +137,39 @@ export function App() {
         console.error('Erro no polling:', err);
       }
     }, 1200);
+  };
+
+  const handleSelectHistoryItem = async (item: HistoryItem) => {
+    setIsHistoryOpen(false);
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch(`/api/transcricoes/${item.id}`);
+      if (!res.ok) throw new Error('Não foi possível carregar a transcrição do histórico.');
+
+      const job: TranscriptionJobResponse = await res.json();
+      if (job.status === 'concluido' && job.value) {
+        setTranscriptionId(item.id);
+        setCurrentFilename(item.filename);
+        setTipo(job.tipo);
+        setData(job.value);
+        setStep('review');
+      } else {
+        throw new Error('Esta transcrição expirou ou não está mais disponível.');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Erro ao carregar item do histórico.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleClearHistory = () => {
+    setHistory([]);
+    try {
+      localStorage.removeItem(HISTORY_STORAGE_KEY);
+    } catch {}
   };
 
   const handleSave = async () => {
@@ -129,9 +217,19 @@ export function App() {
         tipo={tipo}
         transcriptionId={transcriptionId}
         isSaving={isSaving}
+        historyCount={history.length}
+        onOpenHistory={() => setIsHistoryOpen(true)}
         onSave={handleSave}
         onReset={handleReset}
         onDownload={handleDownload}
+      />
+
+      <HistoryModal
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        history={history}
+        onSelect={handleSelectHistoryItem}
+        onClear={handleClearHistory}
       />
 
       <main className="main-content">
@@ -155,12 +253,12 @@ export function App() {
               <div className="table-header-bar">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                   <h2 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#173772' }}>
-                    Revisão da Transcrição
+                    Revisão: <span style={{ fontWeight: 500, color: '#64748B', fontSize: '0.9rem' }}>{currentFilename}</span>
                   </h2>
                   {saveSuccess && (
                     <span className="badge" style={{ backgroundColor: '#D1FAE5', color: '#065F46' }}>
                       <CheckCircle2 size={13} />
-                      <span>Alterações salvas!</span>
+                      <span>Salvo! (Ctrl+S)</span>
                     </span>
                   )}
                 </div>
