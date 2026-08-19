@@ -25,5 +25,7 @@ Thumbs.db
 .env
 .env.local
 
+desafio-programador/
+
 # NOTA: os PDFs de `exemplos/` e as planilhas entregues devem ser
 # versionados. Não adicione `*.pdf` / `*.xlsx` aqui.

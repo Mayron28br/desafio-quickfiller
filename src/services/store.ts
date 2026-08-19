@@ -6,8 +6,9 @@ class TranscriptionStore {
   private readonly TTL_MS = 24 * 60 * 60 * 1000; // 24 horas
 
   constructor() {
-    // Executa limpeza periódica a cada hora
-    setInterval(() => this.cleanupExpired(), 60 * 60 * 1000);
+    // Executa limpeza periódica a cada hora (unref para não segurar o event loop)
+    const timer = setInterval(() => this.cleanupExpired(), 60 * 60 * 1000);
+    if (timer.unref) timer.unref();
   }
 
   public createJob(id: string, tipo: DocumentType, pdfBuffer?: Buffer, pdfFilename?: string): TranscriptionJob {
@@ -31,15 +32,24 @@ class TranscriptionStore {
     return this.jobs.get(id);
   }
 
-  public updateJobStatus(id: string, status: JobStatus, value: TranscriptionValue | null, erro: string | null = null): void {
+  public updateJobStatus(
+    id: string,
+    status: JobStatus,
+    value: TranscriptionValue | null,
+    erro: string | null = null,
+    tipo?: DocumentType
+  ): void {
     const job = this.jobs.get(id);
     if (!job) return;
 
+    if (tipo) {
+      job.tipo = tipo;
+    }
     job.status = status;
     job.value = value;
     job.erro = erro;
     job.updatedAt = new Date();
-    logInfo('Store:UpdateJobStatus', { id, status, hasError: !!erro });
+    logInfo('Store:UpdateJobStatus', { id, status, tipo: job.tipo, hasError: !!erro });
   }
 
   public updateJobValue(id: string, value: TranscriptionValue): boolean {

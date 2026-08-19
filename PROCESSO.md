@@ -35,11 +35,21 @@ Este documento registra a condução do projeto, as ferramentas utilizadas, a in
 - **O que ocorreu**: O servidor quebrou na inicialização devido à rota `app.get('*')`, pois o `path-to-regexp` do Express 5 exige parâmetros nomeados para wildcards. Simultaneamente, o compilador do TypeScript no frontend rejeitou imports de tipos sem a diretiva `import type`.
 - **Como percebi e conduzi**: Substituí o wildcard por um middleware SPA condicional em `src/server.ts` e adequei todos os imports do React para a sintaxe `import type { ... }`.
 
+### 4. Detecção de Documentos Escaneados com Assinatura Eletrônica do PJe
+- **O que ocorreu**: Documentos de processos trabalhistas extraídos do PJe contêm carimbos digitais no rodapé (`Assinado eletronicamente por...`, `Fls.: 316`). O verificador de tamanho de texto anterior identificava mais de 20 caracteres e considerava a página digital, deixando de executar o OCR e retornando a página em branco.
+- **Como percebi e conduzi**: Criei uma função de higienização de metadados (`cleanPjeMetadata`) que filtra assinaturas e dados de processo antes de calcular o volume de texto útil. Se o texto útil for insuficiente para o domínio, o pipeline ativa automaticamente a rasterização com OCR em alta escala (2.5).
+
+### 6. Identificação Automática de Tipo de Documento e Painel Único
+- **O que ocorreu**: O usuário precisava escolher manualmente se o documento enviado era um Cartão de Ponto ou um Holerite. Além disso, folhas de pagamento com seções de acerto e valores de desconto com sinal negativo (`-433,20`) necessitavam de tratamento para não truncar valores nem perder sinais nos campos.
+- **Como percebi e conduzi**: Criei uma função de inferência baseada em termos lexicais e densidade numérica/temporal (`detectDocumentType`) que detecta o tipo automaticamente a partir do conteúdo do PDF. No frontend, unifiquei a interface de upload em um painel único com suporte a drag-and-drop direto, eliminando o seletor manual.
+
 ---
 
 ## 3. O que foi Feito ou Reescrito e Por Quê
 
+- **Painel Único com Identificação Automática**: Simplifica a experiência do usuário para um fluxo de 1 clique: arrastar o PDF e obter a planilha transcrita diretamente.
 - **Pipeline Híbrido de Leitura (Digital + OCR com Rasterização)**: Permite que a aplicação trate tanto PDFs gerados em sistemas de RH quanto documentos digitalizados em scanners com rotação ou ruído, sem depender de ferramentas externas de sistema operacional.
+- **Parsers Especializados Multi-Layout**: Suporte nativo aos formatos mais recorrentes no mercado (Banco do Brasil com intervalos, SIPON / POEL,C com batidas matutinas/vespertinas em linhas separadas, cartões colunares de ponto mecânico e holerites com 2 colunas e valores negativos).
 - **Interface de Revisão com Rolagem Independente (Side-by-Side)**: O layout com CSS Grid e flexbox garante que o revisor consiga navegar pelo PDF original à esquerda e editar as células na tabela à direita sem perda de contexto.
 - **Exportação com Formatação Fiel ao Contrato**: As planilhas geradas em `.xlsx` aplicam estilos institucionais na primeira linha (`#173772` com texto branco em negrito) e aplicam a matriz de alerta (Amarelo `#FFF3CD` para batidas ímpares/`?` e Vermelho `#F8D7DA` com borda lateral `#DC3545` para quebras de sequência temporal).
 
@@ -75,10 +85,10 @@ Este documento registra a condução do projeto, as ferramentas utilizadas, a in
 
 - [x] Configuração do repositório, `.gitignore` e TypeScript.
 - [x] Implementação dos contratos de API (`POST /api/transcricoes`, `GET /api/transcricoes/:id`, `PUT /api/transcricoes/:id`, `GET /api/transcricoes/:id/planilha`, `GET /healthz`).
-- [x] Extrator de Cartão de Ponto com normalização e preservação de dados raw.
-- [x] Extrator de Holerite com separação estrita entre verbas e bases.
-- [x] Migração de `pdf-parse` para `unpdf` + pipeline de OCR com rasterização canvas (`@napi-rs/canvas`).
-- [x] Motor de alertas dinâmicos (Amarelo e Vermelho com precedência).
+- [x] Extrator de Cartão de Ponto com suporte a múltiplos layouts (Banco do Brasil, SIPON, Colunar Operador, Quinzenal).
+- [x] Extrator de Holerite com suporte a 2 colunas, deduplicação de via dupla e separação estrita entre verbas e bases.
+- [x] Pipeline de OCR com rasterização canvas (`@napi-rs/canvas` em scale 2.5) e filtragem de metadados PJe.
+- [x] Motor de alertas dinâmicos (Amarelo e Vermelho com precedência e suporte a múltiplos formatos de data).
 - [x] Geração de planilhas `.xlsx`, `.csv` e `.json` com estilos institucionais.
 - [x] Front-end React com visualizador de PDF lado a lado e tabela editável.
 - [x] Suíte completa de testes unitários com 100% de sucesso.

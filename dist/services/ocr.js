@@ -2,8 +2,23 @@ import { extractText, renderPageAsImage } from 'unpdf';
 import { createWorker } from 'tesseract.js';
 import { logInfo, logError } from '../utils/security.js';
 /**
+ * Remove cabeçalhos e rodapés de assinatura eletrônica do PJe para avaliar se há conteúdo real na página.
+ */
+function cleanPjeMetadata(text) {
+    return text
+        .replace(/Assinado eletronicamente por:.*$/gmi, '')
+        .replace(/Documento assinado eletronicamente por:?.*$/gmi, '')
+        .replace(/Juntado em:.*$/gmi, '')
+        .replace(/ID\.\s+[a-f0-9]+.*$/gmi, '')
+        .replace(/Fls\.?:?\s*\d+/gmi, '')
+        .replace(/Número do processo:.*$/gmi, '')
+        .replace(/Número do documento:.*$/gmi, '')
+        .replace(/Tribunal Regional do Trabalho.*$/gmi, '')
+        .trim();
+}
+/**
  * Extrai o texto de um documento PDF página por página.
- * Caso uma página não possua camada de texto vetorial (< 20 caracteres legíveis),
+ * Caso uma página não possua camada de texto vetorial útil (< 35 caracteres após remoção de metadados do PJe),
  * rasteriza a página para imagem e aplica OCR (Tesseract) como fallback.
  */
 export async function extractDocumentText(pdfBuffer) {
@@ -14,9 +29,10 @@ export async function extractDocumentText(pdfBuffer) {
         const total = totalPages || pageTexts.length || 1;
         for (let i = 0; i < total; i++) {
             const pageText = (pageTexts[i] || '').trim();
+            const usefulText = cleanPjeMetadata(pageText);
             const pageNumber = i + 1;
-            // Se a página tem texto embutido suficiente (PDF Digital)
-            if (pageText.length >= 20) {
+            // Se a página tem texto embutido útil suficiente (PDF Digital com tabela real)
+            if (usefulText.length >= 35) {
                 pages.push({
                     pageNumber,
                     text: pageText,
@@ -24,13 +40,13 @@ export async function extractDocumentText(pdfBuffer) {
                 });
             }
             else {
-                // Página sem camada de texto (PDF Escaneado): rasterizar para imagem e rodar OCR
-                logInfo('OCR:FallbackNeeded', { pageNumber });
+                // Página sem camada de texto útil (PDF Escaneado ou imagem com apenas carimbo PJe): rodar OCR
+                logInfo('OCR:FallbackNeeded', { pageNumber, usefulLength: usefulText.length });
                 let ocrText = '';
                 try {
                     const imageArrayBuffer = await renderPageAsImage(new Uint8Array(pdfBuffer), pageNumber, {
                         canvasImport: () => import('@napi-rs/canvas'),
-                        scale: 2.0
+                        scale: 2.5
                     });
                     const worker = await createWorker('por');
                     const ret = await worker.recognize(Buffer.from(imageArrayBuffer));

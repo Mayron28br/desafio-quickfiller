@@ -11,10 +11,10 @@ export const ProcessingProgress: React.FC<ProcessingProgressProps> = ({ tipo }) 
       <div className="progress-card">
         <div className="spinner" />
         <h2 style={{ color: '#173772', fontSize: '1.35rem', marginBottom: '0.5rem', fontWeight: 700 }}>
-          Processando {tipo === 'cartao-ponto' ? 'Cartão de Ponto' : 'Holerite'}...
+          {tipo === 'cartao-ponto' ? 'Processando Cartão de Ponto...' : tipo === 'holerite' ? 'Processando Holerite...' : 'Identificando e Processando Documento...'}
         </h2>
         <p style={{ color: '#64748B', fontSize: '0.9rem', marginBottom: '1.75rem' }}>
-          Analisando camadas de texto, executando OCR em páginas escaneadas e estruturando dados.
+          Identificando layout, executando OCR em páginas escaneadas e estruturando dados.
         </p>
 
         <div style={{ textAlign: 'left', background: '#F8FAFC', padding: '1rem 1.25rem', borderRadius: '8px', border: '1px solid #E2E8F0', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>

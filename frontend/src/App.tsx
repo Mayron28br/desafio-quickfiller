@@ -26,15 +26,15 @@ export function App() {
     };
   }, []);
 
-  const handleUpload = async (file: File, selectedTipo: DocumentType) => {
+  const handleUpload = async (file: File) => {
     setIsLoading(true);
     setError(null);
-    setTipo(selectedTipo);
+    setTipo(null);
 
     try {
       const formData = new FormData();
       formData.append('arquivo', file);
-      formData.append('tipo', selectedTipo);
+      formData.append('tipo', 'auto');
 
       const res = await fetch('/api/transcricoes', {
         method: 'POST',
@@ -68,6 +68,7 @@ export function App() {
 
         if (job.status === 'concluido' && job.value) {
           if (pollingTimerRef.current) clearInterval(pollingTimerRef.current);
+          setTipo(job.tipo);
           setData(job.value);
           setStep('review');
           setIsLoading(false);
@@ -142,8 +143,8 @@ export function App() {
           />
         )}
 
-        {step === 'processing' && tipo && (
-          <ProcessingProgress tipo={tipo} />
+        {step === 'processing' && (
+          <ProcessingProgress tipo={tipo || 'auto'} />
         )}
 
         {step === 'review' && transcriptionId && data && tipo && (

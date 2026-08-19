@@ -3,8 +3,10 @@ class TranscriptionStore {
     jobs = new Map();
     TTL_MS = 24 * 60 * 60 * 1000; // 24 horas
     constructor() {
-        // Executa limpeza periódica a cada hora
-        setInterval(() => this.cleanupExpired(), 60 * 60 * 1000);
+        // Executa limpeza periódica a cada hora (unref para não segurar o event loop)
+        const timer = setInterval(() => this.cleanupExpired(), 60 * 60 * 1000);
+        if (timer.unref)
+            timer.unref();
     }
     createJob(id, tipo, pdfBuffer, pdfFilename) {
         const job = {
@@ -25,15 +27,18 @@ class TranscriptionStore {
     getJob(id) {
         return this.jobs.get(id);
     }
-    updateJobStatus(id, status, value, erro = null) {
+    updateJobStatus(id, status, value, erro = null, tipo) {
         const job = this.jobs.get(id);
         if (!job)
             return;
+        if (tipo) {
+            job.tipo = tipo;
+        }
         job.status = status;
         job.value = value;
         job.erro = erro;
         job.updatedAt = new Date();
-        logInfo('Store:UpdateJobStatus', { id, status, hasError: !!erro });
+        logInfo('Store:UpdateJobStatus', { id, status, tipo: job.tipo, hasError: !!erro });
     }
     updateJobValue(id, value) {
         const job = this.jobs.get(id);

@@ -1,17 +1,28 @@
 import { CartaoPontoPage, DayRecord, HoleritePage, RowAlert } from '../types/index.js';
 
 /**
- * Converte data DD/MM ou DD/MM/YYYY em objeto numérico { day, month, year } para checagem sequencial.
+ * Converte data DD/MM/YYYY, DD/MM, "01 SAB", "2 - SEG" ou "01" em objeto numérico para checagem sequencial.
  */
 function parseDateForSequence(dateStr: string): { day: number; month: number; year: number } | null {
   if (!dateStr || dateStr.includes('?')) return null;
-  const parts = dateStr.split(/[\/\-\.]/).map(p => parseInt(p, 10));
-  if (parts.length >= 2 && !isNaN(parts[0]!) && !isNaN(parts[1]!)) {
-    const day = parts[0]!;
-    const month = parts[1]!;
-    const year = parts.length >= 3 && !isNaN(parts[2]!) ? parts[2]! : 2026;
+
+  // 1. Formato com barras/traços e mês (DD/MM/YYYY ou DD/MM)
+  const slashMatch = dateStr.match(/^(\d{1,2})[\/\-\.](\d{1,2})(?:[\/\-\.](\d{2,4}))?/);
+  if (slashMatch && slashMatch[1] && slashMatch[2]) {
+    const day = parseInt(slashMatch[1], 10);
+    const month = parseInt(slashMatch[2], 10);
+    let year = slashMatch[3] ? parseInt(slashMatch[3], 10) : 2026;
+    if (year < 100) year += 2000;
     return { day, month, year };
   }
+
+  // 2. Formato Banco do Brasil / SIPON / Quinzena: "01 SAB", "2 - SEG", "01"
+  const dayMatch = dateStr.match(/^(\d{1,2})(?:\s*[\-\s]\s*(?:SEG|TER|QUA|QUI|SEX|SAB|DOM|FER))?$/i);
+  if (dayMatch && dayMatch[1]) {
+    const day = parseInt(dayMatch[1], 10);
+    return { day, month: 1, year: 2026 };
+  }
+
   return null;
 }
 

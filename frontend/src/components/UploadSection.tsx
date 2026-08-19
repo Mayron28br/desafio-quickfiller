@@ -1,15 +1,13 @@
 import React, { useState, useRef } from 'react';
-import type { DocumentType } from '../types/index';
-import { UploadCloud, FileText, CheckCircle2, AlertCircle } from 'lucide-react';
+import { UploadCloud, FileText, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
 
 interface UploadSectionProps {
-  onUpload: (file: File, tipo: DocumentType) => void;
+  onUpload: (file: File) => void;
   isLoading: boolean;
   error: string | null;
 }
 
 export const UploadSection: React.FC<UploadSectionProps> = ({ onUpload, isLoading, error }) => {
-  const [tipo, setTipo] = useState<DocumentType>('cartao-ponto');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -41,15 +39,20 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onUpload, isLoadin
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedFile) return;
-    onUpload(selectedFile, tipo);
+    onUpload(selectedFile);
   };
 
   return (
     <div className="upload-wrapper">
       <div className="upload-card">
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', backgroundColor: '#EFF6FF', color: '#1E40AF', padding: '0.35rem 0.85rem', borderRadius: '9999px', fontSize: '0.8rem', fontWeight: 600, marginBottom: '1rem' }}>
+          <Sparkles size={14} />
+          <span>Identificação Automática de Documento</span>
+        </div>
+
         <h1 className="upload-title">Transcrição de Documentos Trabalhistas</h1>
         <p className="upload-subtitle">
-          Envie cartões de ponto ou holerites em PDF para extrair, revisar e exportar planilhas estruturadas.
+          Envie seu PDF (Cartão de Ponto ou Holerite). O sistema identifica o tipo automaticamente, executa OCR quando necessário e gera a planilha com os alertas da legislação.
         </p>
 
         {error && (
@@ -60,30 +63,13 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onUpload, isLoadin
         )}
 
         <form onSubmit={handleSubmit}>
-          <div className="type-selector">
-            <div
-              className={`type-option ${tipo === 'cartao-ponto' ? 'selected' : ''}`}
-              onClick={() => setTipo('cartao-ponto')}
-            >
-              <span className="type-option-title">Cartão de Ponto</span>
-              <span className="type-option-desc">Jornada diária, batidas em pares Entrada/Saída</span>
-            </div>
-
-            <div
-              className={`type-option ${tipo === 'holerite' ? 'selected' : ''}`}
-              onClick={() => setTipo('holerite')}
-            >
-              <span className="type-option-title">Holerite</span>
-              <span className="type-option-desc">Demonstrativo de pagamento, verbas e bases</span>
-            </div>
-          </div>
-
           <div
             className={`dropzone ${isDragActive ? 'active' : ''}`}
             onDragOver={(e) => { e.preventDefault(); setIsDragActive(true); }}
             onDragLeave={() => setIsDragActive(false)}
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
+            style={{ cursor: 'pointer' }}
           >
             <input
               type="file"
@@ -92,12 +78,12 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onUpload, isLoadin
               accept=".pdf,application/pdf"
               style={{ display: 'none' }}
             />
-            <UploadCloud size={40} className="dropzone-icon" />
-            <p style={{ fontWeight: 600, color: '#173772', marginBottom: '0.25rem' }}>
+            <UploadCloud size={44} className="dropzone-icon" />
+            <p style={{ fontWeight: 600, color: '#173772', fontSize: '1.05rem', marginBottom: '0.35rem' }}>
               Clique para selecionar ou arraste o PDF aqui
             </p>
-            <p style={{ fontSize: '0.85rem', color: '#64748B' }}>
-              Suporta PDFs digitais e escaneados (OCR automático) até 20MB
+            <p style={{ fontSize: '0.85rem', color: '#64748B', maxWidth: '420px', margin: '0 auto' }}>
+              Suporta Cartões de Ponto (Banco do Brasil, SIPON, Colunar, Mecânico) e Holerites/Recibos de Pagamento digitais ou escaneados.
             </p>
           </div>
 
@@ -109,12 +95,12 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onUpload, isLoadin
             </div>
           )}
 
-          <div>
+          <div style={{ marginTop: '1.5rem' }}>
             <button
               type="submit"
               className="btn btn-primary"
               disabled={!selectedFile || isLoading}
-              style={{ width: '100%', padding: '0.8rem' }}
+              style={{ width: '100%', padding: '0.85rem', fontSize: '1rem', fontWeight: 600 }}
             >
               {isLoading ? 'Enviando documento...' : 'Processar Documento'}
             </button>

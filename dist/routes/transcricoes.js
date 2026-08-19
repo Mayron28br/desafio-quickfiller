@@ -19,12 +19,58 @@ function getParamId(req) {
     return raw || '';
 }
 /**
+ * Identifica automaticamente se o documento é Cartão de Ponto ou Holerite a partir do texto extraído.
+ */
+export function detectDocumentType(extractedDoc) {
+    let holeriteScore = 0;
+    let cartaoScore = 0;
+    const fullText = extractedDoc.pages.map(p => p.text).join('\n').toLowerCase();
+    const holeriteKeywords = [
+        'holerite', 'recibo de pagamento', 'demonstrativo de pagamento', 'folha de pagamento',
+        'declaração remuneração', 'declaracao remuneracao', 'rendimentos', 'vencimento padrao',
+        'salário base', 'salario base', 'proventos', 'descontos', 'valor líquido', 'valor liquido',
+        'líquido a receber', 'liquido a receber', 'base inss', 'base fgts', 'base irrf',
+        'sal. contrib. inss', 'proventos bruto', 'proventos líquidos', 'provisão fgts', 'verba nome'
+    ];
+    const cartaoKeywords = [
+        'cartão de ponto', 'cartao de ponto', 'folha de ponto', 'espelho de ponto',
+        'ponto eletrônico', 'ponto eletronico', 'relatório mensal', 'relatorio mensal',
+        'folha de frequencia', 'folha de frequência', 'sipon', 'poel', 'quinzena',
+        'entrada', 'saida', 'saída', 'intervalo', 'batida', 'horas extras',
+        'banco de horas', 'jornada', 'operador de escavadeira', 'sem registro de ponto',
+        'descanso semanal'
+    ];
+    for (const kw of holeriteKeywords) {
+        if (fullText.includes(kw)) {
+            holeriteScore += 3;
+        }
+    }
+    for (const kw of cartaoKeywords) {
+        if (fullText.includes(kw)) {
+            cartaoScore += 3;
+        }
+    }
+    const timeMatches = fullText.match(/\b[0-2]?\d:[0-5]\d\b/g) || [];
+    const moneyMatches = fullText.match(/-?\b\d{1,3}(?:\.\d{3})*,\d{2}\b/g) || [];
+    if (timeMatches.length > moneyMatches.length * 2) {
+        cartaoScore += 5;
+    }
+    if (moneyMatches.length > timeMatches.length * 2) {
+        holeriteScore += 5;
+    }
+    return holeriteScore > cartaoScore ? 'holerite' : 'cartao-ponto';
+}
+/**
  * Worker assíncrono para processar o PDF em background.
  */
-async function processTranscriptionBackground(id, tipo, pdfBuffer) {
+async function processTranscriptionBackground(id, requestedTipo, pdfBuffer) {
     try {
-        logInfo('Worker:Start', { id, tipo });
+        logInfo('Worker:Start', { id, requestedTipo });
         const extractedDoc = await extractDocumentText(pdfBuffer);
+        const tipo = (requestedTipo === 'cartao-ponto' || requestedTipo === 'holerite')
+            ? requestedTipo
+            : detectDocumentType(extractedDoc);
+        logInfo('Worker:DetectedType', { id, tipo });
         let parsedValue;
         if (tipo === 'cartao-ponto') {
             parsedValue = parseCartaoPonto(extractedDoc);
@@ -32,7 +78,7 @@ async function processTranscriptionBackground(id, tipo, pdfBuffer) {
         else {
             parsedValue = parseHolerite(extractedDoc);
         }
-        store.updateJobStatus(id, 'concluido', parsedValue, null);
+        store.updateJobStatus(id, 'concluido', parsedValue, null, tipo);
         logInfo('Worker:Complete', { id, tipo, pagesCount: parsedValue.pages.length });
     }
     catch (err) {
@@ -43,13 +89,13 @@ async function processTranscriptionBackground(id, tipo, pdfBuffer) {
 }
 /**
  * POST /api/transcricoes
- * Envio de PDF para transcrição assíncrona.
+ * Envio de PDF para transcrição assíncrona (com auto-detecção de tipo de documento).
  */
 router.post('/transcricoes', upload.single('arquivo'), (req, res) => {
     try {
         const tipo = req.body.tipo;
-        if (!tipo || (tipo !== 'cartao-ponto' && tipo !== 'holerite')) {
-            res.status(400).json({ erro: 'Campo "tipo" obrigatório e deve ser "cartao-ponto" ou "holerite".' });
+        if (tipo && tipo !== 'cartao-ponto' && tipo !== 'holerite' && tipo !== 'auto') {
+            res.status(400).json({ erro: 'Campo "tipo" deve ser "cartao-ponto", "holerite" ou "auto".' });
             return;
         }
         if (!req.file || !req.file.buffer) {
@@ -61,7 +107,8 @@ router.post('/transcricoes', upload.single('arquivo'), (req, res) => {
             return;
         }
         const id = uuidv4().substring(0, 8);
-        store.createJob(id, tipo, req.file.buffer, req.file.originalname);
+        const initialTipo = (tipo === 'cartao-ponto' || tipo === 'holerite') ? tipo : 'cartao-ponto';
+        store.createJob(id, initialTipo, req.file.buffer, req.file.originalname);
         // Dispara processamento em background (não bloqueia a resposta HTTP)
         setImmediate(() => {
             processTranscriptionBackground(id, tipo, req.file.buffer);
