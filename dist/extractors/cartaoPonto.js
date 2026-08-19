@@ -51,19 +51,81 @@ function createPunchesFromRawList(rawTimes) {
     return punches;
 }
 /**
+ * Repara tokens de horário com ruídos ópticos comuns de OCR (ex: carimbos mecânicos com letras/símbolos de relógio).
+ */
+export function repairOcrTimeToken(token) {
+    if (!token)
+        return null;
+    let s = token.trim();
+    // Remove caracteres/símbolos iniciais que são ícones de relógio (ex: R, B, M, $, aB, etc.)
+    s = s.replace(/^[^0-9IiloOSsBGZz]+/, '');
+    const charMap = {
+        'O': '0', 'o': '0', 'D': '0',
+        'I': '1', 'i': '1', 'l': '1', '|': '1', '[': '1', ']': '1', '!': '1',
+        'Z': '2', 'z': '2',
+        'E': '3',
+        'A': '4',
+        'S': '5', 's': '5',
+        'G': '6', 'b': '6',
+        'T': '7',
+        'B': '8',
+        'g': '9', 'q': '9'
+    };
+    // Se o token contém separador de hora/minuto (: . h)
+    if (s.includes(':') || s.includes('.') || s.includes('h') || s.includes('H')) {
+        const parts = s.split(/[:\.hH]/);
+        if (parts.length >= 2) {
+            let hStr = parts[0].split('').map(c => charMap[c] || c).join('').replace(/\D/g, '');
+            let mStr = parts[1].split('').map(c => charMap[c] || c).join('').replace(/\D/g, '');
+            if (hStr.length > 2)
+                hStr = hStr.slice(-2);
+            if (mStr.length > 2)
+                mStr = mStr.slice(0, 2);
+            if (hStr.length >= 1 && mStr.length === 2) {
+                const hh = parseInt(hStr, 10);
+                const mm = parseInt(mStr, 10);
+                if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+                    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+                }
+            }
+        }
+    }
+    // Se o token for uma sequência de 4 caracteres numéricos (ex: 0950 -> 09:50)
+    const clean = s.split('').map(c => charMap[c] || c).join('').replace(/\D/g, '');
+    if (clean.length === 4) {
+        const hh = parseInt(clean.substring(0, 2), 10);
+        const mm = parseInt(clean.substring(2, 4), 10);
+        if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+            return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+        }
+    }
+    return null;
+}
+/**
  * Extrai horários brutos de uma linha de texto padrão.
  */
 function extractRawTimesFromText(text) {
     // Regex que reconhece horários com prefixo +, sufixos (c, d, e), separadores : . h ou ?
     const timeRegex = /(?:\+)?\b(?:[0-2]?[0-9]|\?{1,2})[:hH\.]?(?:[0-5][0-9]|\?{1,2})[a-zA-Z]?\b/g;
     const matches = text.match(timeRegex) || [];
-    return matches.filter(raw => {
+    const validTimes = matches.filter(raw => {
         const clean = raw.replace(/[+a-zA-Z]/g, '');
         if (clean.length < 3 && !clean.includes(':') && !clean.includes('h') && !clean.includes('.')) {
             return false;
         }
         return true;
     });
+    // Se não encontrou horários com o regex padrão, tenta recuperar via tokens de OCR
+    if (validTimes.length === 0) {
+        const tokens = text.split(/[\s,;|]+/);
+        for (const tok of tokens) {
+            const repaired = repairOcrTimeToken(tok);
+            if (repaired && !validTimes.includes(repaired)) {
+                validTimes.push(repaired);
+            }
+        }
+    }
+    return validTimes;
 }
 /**
  * Extrator específico para o layout Banco do Brasil (Ponto Eletrônico - Relatório Mensal).
@@ -194,57 +256,6 @@ function parseSiponPage(text, pageNumber) {
         return null;
     return { page: pageNumber, days };
 }
-const CANONICAL_QUINZENA_CARDS = {
-    1: {
-        1: ['09:50', '14:15', '15:14', '19:21', '19:35', '23:20'],
-        3: ['06:22', '14:31', '15:27', '19:16', '19:29', '23:28'],
-        5: ['09:09', '14:04', '15:01', '18:14', '18:29', '23:45'],
-        7: ['09:30', '14:59', '15:40', '19:44', '20:16', '22:40'],
-        9: ['09:41', '15:10', '16:04', '19:55', '20:10', '23:43'],
-        11: ['09:42', '14:16', '15:12', '19:47', '20:00', '23:27'],
-        13: ['09:34', '12:53', '13:40', '16:45', '16:58', '23:30'],
-        15: ['09:39', '16:00', '16:57', '19:59', '20:12', '22:41'],
-    },
-    2: {
-        17: ['09:32', '14:23', '15:21', '16:20', '16:35', '23:42'],
-        19: ['09:46', '16:32', '17:30', '23:36'],
-        21: ['09:11', '14:07', '15:07', '16:50', '17:04', '23:36'],
-        22: ['17:14', '21:54', '22:09', '23:51'],
-        23: ['08:24', '15:24', '16:24', '21:41', '21:54', '23:46'],
-        27: ['09:48', '14:00', '14:59', '17:12', '17:27', '23:11'],
-        29: ['09:16', '15:29', '16:27', '17:07', '17:21', '23:28'],
-        31: ['08:39', '12:15', '12:39', '16:15'],
-    },
-    3: {
-        2: ['09:02', '14:16', '15:15', '19:38', '19:49', '23:05'],
-        4: ['09:32', '15:06', '16:04', '19:00', '19:14', '23:15'],
-        6: ['08:49', '14:41', '15:38', '17:39', '17:54', '23:03'],
-        8: ['08:30', '15:13', '16:12', '19:40', '19:53', '23:14'],
-        10: ['09:50', '14:49', '15:48', '20:00', '20:13', '23:25'],
-        12: ['08:46', '15:18', '16:18', '18:45', '18:55', '23:10'],
-        14: ['09:53', '14:50', '15:48', '18:35', '18:50', '22:58'],
-    },
-    4: {
-        16: ['09:10', '15:16', '16:17', '18:06', '18:21', '23:01'],
-        18: ['09:36', '14:53', '15:52', '19:18', '19:33', '23:01'],
-        20: ['09:34', '15:18', '16:18', '19:56', '20:08', '23:21'],
-        22: ['09:44', '13:54', '14:54', '18:11', '18:26', '23:18'],
-        23: ['09:42', '15:11', '16:11', '18:30', '18:45', '23:41'],
-        26: ['09:31', '14:22', '15:21', '18:15', '18:25', '23:19'],
-        28: ['09:41', '13:48', '14:46', '17:45', '17:55', '22:57'],
-        30: ['09:43', '14:26', '15:26', '18:18', '18:18', '23:07'],
-    },
-    5: {
-        1: ['09:56', '14:28', '15:28', '18:46', '19:02', '22:50'],
-        3: ['09:40', '14:37', '15:37', '18:48', '19:04', '22:49'],
-        5: ['09:47', '14:18', '15:18', '18:31', '18:46', '23:14'],
-        7: ['09:22', '14:08', '15:07', '17:55', '17:10', '22:56'],
-        9: ['09:32', '15:01', '16:00', '18:06', '18:21', '23:01'],
-        11: ['09:52', '14:05', '15:02', '18:11', '18:26', '23:04'],
-        13: ['09:54', '13:26', '14:26', '18:07', '18:24', '23:09'],
-        15: ['09:58', '14:18', '15:18', '16:57', '17:13', '22:53'],
-    }
-};
 /**
  * Extrator para layout Quinzenal / Manual / Carimbado (Ex: 1.QUINZENA / 2.QUINZENA).
  * Colunas: DIAS | MANHÃ Entrada Saída | TARDE Entrada Saída | EXTRA Entrada Saída
@@ -276,19 +287,6 @@ function parseQuinzenaPage(text, pageNumber) {
                 }
             }
         }
-    }
-    let totalPunchesFound = 0;
-    for (const punches of daysMap.values()) {
-        totalPunchesFound += punches.length;
-    }
-    // Se o OCR de imagem ruidosa não capturou batidas suficientes (< 5 batidas na página), utiliza a calibragem canônica
-    if (totalPunchesFound < 5 && CANONICAL_QUINZENA_CARDS[pageNumber]) {
-        const canonicalMap = CANONICAL_QUINZENA_CARDS[pageNumber];
-        for (const [dayNumStr, times] of Object.entries(canonicalMap)) {
-            const dayNum = parseInt(dayNumStr, 10);
-            daysMap.set(dayNum, createPunchesFromRawList(times));
-        }
-        foundAny = true;
     }
     if (!foundAny)
         return null;
